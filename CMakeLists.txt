@@ -20,3 +20,15 @@ add_library(${PROJECT_NAME} SHARED
   )
 
 target_link_libraries(${PROJECT_NAME} Qt5::Core Qt5::SerialBus Qt5::Network)
+
+if(MSVC)
+    include_directories(./linux_porting)
+    target_link_libraries(${PROJECT_NAME} Ws2_32)
+    include_directories(cannelloni/ cannelloni/include/ linux_porting/)
+    add_definitions(-D_WIN32_WINNT_WIN10_TH2=0x0A000001
+        -D_WIN32_WINNT_WIN10_RS1=0x0A000002
+        -D_WIN32_WINNT_WIN10_RS2=0x0A000003
+        -D_WIN32_WINNT_WIN10_RS3=0x0A000004
+        -D_WIN32_WINNT_WIN10_RS4=0x0A000005
+        -D_WIN32_WINNT_WIN10_RS5=0x0A000006)
+endif()

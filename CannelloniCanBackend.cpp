@@ -1,13 +1,14 @@
 #include "CannelloniCanBackend.h"
 #include "cannelloni/parser.h"
 
+#include <QDateTime>
 #include <QNetworkDatagram>
 #include <QTimerEvent>
 
 namespace
 {
 const unsigned long MAX_BYTES_PER_SEC = 38400;
-const unsigned long OUTGOING_QUEUE_TIMEOUT_MSEC = 50;
+const unsigned long OUTGOING_QUEUE_TIMEOUT_MSEC = 10;
 const unsigned long MAX_BYTES_PER_TIMEOUT =
     MAX_BYTES_PER_SEC / (1000 / OUTGOING_QUEUE_TIMEOUT_MSEC);
 
@@ -24,12 +25,15 @@ QCanBusFrame convert(const canfd_frame& frame)
     else
         f.setExtendedFrameFormat(false);
 
-    f.setFrameId(frame.can_id);
+    f.setFrameId(frame.can_id & CAN_ERR_MASK); /* omit EFF, RTR, ERR flags */
     f.setFlexibleDataRateFormat(true);
 
     QByteArray a;
     a.append(reinterpret_cast<const char*>(frame.data), frame.len);
     f.setPayload(a);
+
+    f.setTimeStamp(QDateTime::currentDateTime ().toMSecsSinceEpoch () / 1000);
+
     return f;
 }
 
@@ -77,7 +81,7 @@ CannelloniCanBackend::CannelloniCanBackend(quint16 localPort,
                                            const QHostAddress& remoteAddr,
                                            quint16 remotePort)
     : localPort_(localPort), remoteAddr_(remoteAddr), remotePort_(remotePort),
-      timerId_(0)
+      sock_(this), timerId_(0)
 {
 }
 
@@ -95,7 +99,7 @@ QString CannelloniCanBackend::interpretErrorFrame(const QCanBusFrame&)
 bool CannelloniCanBackend::open()
 {
     Q_ASSERT(!sock_.isOpen());
-    if (!sock_.bind(QHostAddress::LocalHost, localPort_))
+    if (!sock_.bind(QHostAddress::AnyIPv4, localPort_))
     {
         setState(QCanBusDevice::UnconnectedState);
         return false;
@@ -142,7 +146,7 @@ void CannelloniCanBackend::dataAvailable()
 void CannelloniCanBackend::timerEvent(QTimerEvent* ev)
 {
     Q_ASSERT(ev->timerId() == timerId_);
-    qDebug() << "CannelloniCanBackend output timer fired";
+    // GGG qDebug() << "CannelloniCanBackend output timer fired";
     auto f = dequeueOutgoingFrame();
     // send every CAN frame as a separate Cannelloni packet. CAN frames can
     // only be at most 64 bytes in length (in case of CANFD), so let's give the
@@ -175,19 +179,21 @@ void CannelloniCanBackend::timerEvent(QTimerEvent* ev)
         // bytesWritten()...
         emit framesWritten(framesSent);
     }
-    qDebug() << "Wrote" << totalBytes << "bytes and" << framesSent << "frames";
+    // GGG qDebug() << "Wrote" << totalBytes << "bytes and" << framesSent << "frames";
 }
 
 void CannelloniCanBackend::handlePacket(const QByteArray& data)
 {
-    qDebug() << "Received valid datagram, size =" << data.size();
+    // GGG qDebug() << "Received valid datagram, size =" << data.size();
     auto allocator = []() {
         return new canfd_frame; // FIXME: preallocate some buffer for frames
     };
 
     QVector<QCanBusFrame> newFrames;
     auto receiver = [&](canfd_frame* frame, bool) {
-        newFrames.push_back(convert(*frame));
+        const QCanBusFrame &qframe = convert(*frame);
+        // qDebug() << "received: " << qframe.toString() << ", " << frame->can_id << ", " << qframe.frameId();
+        newFrames.push_back(qframe);
         delete frame;
     };
 
@@ -195,6 +201,6 @@ void CannelloniCanBackend::handlePacket(const QByteArray& data)
                 reinterpret_cast<const uint8_t*>(data.constData()), allocator,
                 receiver);
 
-    qDebug() << "Received" << newFrames.size() << "new frames";
+    // GGG qDebug() << "Received" << newFrames.size() << "new frames";
     enqueueReceivedFrames(newFrames);
 }

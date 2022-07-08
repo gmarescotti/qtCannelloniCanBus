@@ -3,6 +3,7 @@
 #include <QCanBusFactory>
 #include <QObject>
 #include <QStringList>
+#include <QHostInfo>
 #include <limits>
 
 class QtCannelloniCanBusPlugin : public QObject, public QCanBusFactory
@@ -30,10 +31,23 @@ public:
             return nullptr;
         }
         QHostAddress remoteAddr(tokens[1]);
-        if (remoteAddr.isNull())
+        if (remoteAddr.isNull()) // is null could be a DNS (instead of a IPv6)
         {
-            *errorMessage = "Invalid remote address format";
-            return nullptr;
+            QHostInfo info = QHostInfo::fromName(tokens[1]);
+            if (info.addresses().isEmpty()) {
+                *errorMessage = "Invalid remote address format " + tokens[1];
+                return nullptr;
+            }
+            for (const QHostAddress &address: info.addresses()) {
+                if (address.protocol() == QAbstractSocket::IPv4Protocol) {
+                    remoteAddr = address;
+                    break;
+                }
+            }
+            if (remoteAddr.isNull()) {
+                *errorMessage = "Invalid remote address format " + tokens[1];
+                return nullptr;
+            }
         }
         auto remotePort = tokens[2].toUInt(&ok);
         if (!ok || remotePort > quint16max)
